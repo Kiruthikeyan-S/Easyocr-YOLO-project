@@ -8,7 +8,7 @@ import json
 
 # Set page configuration
 st.set_page_config(
-    page_title="Universal OCR (LCD & ID Card Reader)",
+    page_title="Universal OCR Suite (LCD & ID Card Reader)",
     page_icon="🔍",
     layout="wide"
 )
@@ -48,7 +48,9 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-
+# ---------------------------------------------------------
+# Load Engines
+# ---------------------------------------------------------
 @st.cache_resource
 def load_yolo_model():
     return YOLO("YOLO OCR.pt")
@@ -148,18 +150,25 @@ def process_easy_ocr(image_np, conf_threshold=0.20):
     return img_draw_rgb, full_text, len(extracted_lines)
 
 
-# --- SIDEBAR TUNING ---
+# --- SIDEBAR NAVIGATION & MODES ---
 st.sidebar.title("🔍 Navigation & Engine Choice")
 
 ocr_engine = st.sidebar.selectbox(
-    "🤖 Choose Image Type / Engine:",
+    "🤖 Choose OCR Model Engine:",
     [
         "🖥️ Digital LCD Screen Mode (YOLO)",
         "📄 ID Card & Document Mode (EasyOCR)"
     ]
 )
 
-app_mode = st.sidebar.radio("Select Input Mode:", ["📁 Upload Image", "🎥 Live Camera Reader"])
+app_mode = st.sidebar.radio(
+    "Select Input Mode:",
+    [
+        "📁 Upload Image / Folder",
+        "📸 Camera Snapshot (Take Photo)",
+        "🎥 Continuous Live Video Stream"
+    ]
+)
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("⚙️ Tuning Settings")
@@ -168,7 +177,7 @@ y_thresh = st.sidebar.slider("Line Vertical Threshold (y_threshold)", 5, 50, 15,
 
 # Header Section
 st.title("🔍 Universal OCR System")
-st.markdown(f"Selected Mode: <span class='engine-badge'>{ocr_engine}</span>", unsafe_allow_html=True)
+st.markdown(f"Selected Model Engine: <span class='engine-badge'>{ocr_engine}</span>", unsafe_allow_html=True)
 
 def execute_ocr(image_np):
     if "LCD Screen" in ocr_engine:
@@ -176,9 +185,15 @@ def execute_ocr(image_np):
     else:
         return process_easy_ocr(image_np, conf_threshold=conf_thresh)
 
-# --- MODE 1: UPLOAD IMAGE ---
-if app_mode == "📁 Upload Image":
-    st.subheader("📁 Upload Any Image (LCD Screen or ID Card)")
+# Session State for Live Stream Control
+if "stream_active" not in st.session_state:
+    st.session_state.stream_active = False
+
+# =========================================================
+# MODE 1: UPLOAD IMAGE / FOLDER
+# =========================================================
+if app_mode == "📁 Upload Image / Folder":
+    st.subheader("📁 Upload Images (LCD Screens, ID Cards, Documents)")
     uploaded_files = st.file_uploader("Choose image file(s)...", type=["jpg", "jpeg", "png", "bmp"], accept_multiple_files=True)
     
     if uploaded_files:
@@ -190,13 +205,13 @@ if app_mode == "📁 Upload Image":
             
             col1, col2 = st.columns(2)
             with col1:
-                st.image(image, caption="Original Input Image", use_container_width=True)
+                st.image(image, caption="Original Input Image", width=600)
                 
             with st.spinner(f"Processing with {ocr_engine}..."):
                 processed_img, recognized_text, num_dets = execute_ocr(image_np)
                 
             with col2:
-                st.image(processed_img, caption="AI Detections", use_container_width=True)
+                st.image(processed_img, caption="AI Detections", width=600)
 
             st.markdown("<div class='result-card'>", unsafe_allow_html=True)
             st.markdown("#### 🔤 Recognized Text Output:")
@@ -216,10 +231,12 @@ if app_mode == "📁 Upload Image":
             st.markdown("</div>", unsafe_allow_html=True)
             st.markdown("---")
 
-# --- MODE 2: LIVE CAMERA READER ---
-elif app_mode == "🎥 Live Camera Reader":
-    st.subheader("🎥 Live Camera Reader")
-    camera_image = st.camera_input("Take a picture")
+# =========================================================
+# MODE 2: CAMERA SNAPSHOT (TAKE PHOTO)
+# =========================================================
+elif app_mode == "📸 Camera Snapshot (Take Photo)":
+    st.subheader("📸 Camera Snapshot Reader")
+    camera_image = st.camera_input("Take a photo")
 
     if camera_image:
         image = Image.open(camera_image).convert("RGB")
@@ -228,13 +245,13 @@ elif app_mode == "🎥 Live Camera Reader":
         
         col1, col2 = st.columns(2)
         with col1:
-            st.image(image, caption="Captured Snapshot", use_container_width=True)
+            st.image(image, caption="Captured Snapshot", width=600)
             
         with st.spinner(f"Processing with {ocr_engine}..."):
             processed_img, recognized_text, num_dets = execute_ocr(image_np)
             
         with col2:
-            st.image(processed_img, caption="AI Detections", use_container_width=True)
+            st.image(processed_img, caption="AI Detections", width=600)
             
         st.markdown("<div class='result-card'>", unsafe_allow_html=True)
         st.markdown("#### 🔤 Snapshot Recognized Output:")
@@ -250,3 +267,46 @@ elif app_mode == "🎥 Live Camera Reader":
         else:
             st.warning("No text detected in snapshot.")
         st.markdown("</div>", unsafe_allow_html=True)
+
+# =========================================================
+# MODE 3: CONTINUOUS LIVE VIDEO STREAM (START / STOP BUTTONS)
+# =========================================================
+elif app_mode == "🎥 Continuous Live Video Stream":
+    st.subheader("🎥 Real-Time Continuous Live Camera Stream")
+    
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1:
+        if st.button("🟢 START Live Camera (ON)", type="primary", use_container_width=True):
+            st.session_state.stream_active = True
+    with col_btn2:
+        if st.button("🔴 STOP Live Camera (OFF)", type="secondary", use_container_width=True):
+            st.session_state.stream_active = False
+
+    if st.session_state.stream_active:
+        st.success("🟢 Live Camera Stream is ON and running continuously. Click '🔴 STOP Live Camera' above to turn OFF.")
+        FRAME_WINDOW = st.image([])
+        text_placeholder = st.empty()
+
+        cap = cv2.VideoCapture(0)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
+        while st.session_state.stream_active:
+            ret, frame = cap.read()
+            if not ret:
+                st.error("Unable to access webcam feed.")
+                break
+                
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            processed_img, recognized_text, num_dets = execute_ocr(frame_rgb)
+            
+            FRAME_WINDOW.image(processed_img, width=600)
+            
+            if recognized_text:
+                text_placeholder.markdown(f"<div class='result-card'><h4>🔴 Live Text Output:</h4><div class='ocr-text-box'>{recognized_text.replace(chr(10), '<br>')}</div></div>", unsafe_allow_html=True)
+            else:
+                text_placeholder.markdown("<div class='result-card'><h4>🔴 Live Text Output:</h4><i>Scanning live camera feed...</i></div>", unsafe_allow_html=True)
+
+        cap.release()
+    else:
+        st.info("💡 Click **🟢 START Live Camera (ON)** to start continuous live video processing.")

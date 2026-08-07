@@ -1,22 +1,26 @@
 import cv2
 import numpy as np
 from ultralytics import YOLO
+import easyocr
 
-# 1. Load fine-tuned YOLO model
-model = YOLO("YOLO OCR.pt")
+# Load both models
+print("Loading YOLO LCD Model...")
+yolo_model = YOLO("YOLO OCR.pt")
 
-# 2. Open Live Camera Feed (0 = default laptop webcam / USB camera)
+print("Loading EasyOCR General Text Engine...")
+reader = easyocr.Reader(['en'], gpu=False)
+
+# Open Live Camera Feed (0 = default webcam)
 cap = cv2.VideoCapture(0)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
-def reconstruct_text(detections, y_threshold=15, space_threshold=25):
+mode = "EASYOCR"  # Modes: 'EASYOCR' or 'YOLO'
+
+def reconstruct_yolo_text(detections, y_threshold=15, space_threshold=25):
     if not detections:
         return ""
-    
-    # Sort vertically first
     detections = sorted(detections, key=lambda x: (x[1], x[0]))
-    
     lines = []
     current_line = [detections[0]]
     prev_y_min = detections[0][1]
@@ -33,7 +37,6 @@ def reconstruct_text(detections, y_threshold=15, space_threshold=25):
     if current_line:
         lines.append(current_line)
         
-    # Sort horizontally and build final string
     full_text = []
     for line in lines:
         line.sort(key=lambda x: x[0])
@@ -46,49 +49,73 @@ def reconstruct_text(detections, y_threshold=15, space_threshold=25):
         
     return " | ".join(full_text)
 
-print("Starting Live Camera OCR... Press 'q' to quit, 's' to save recognized text.")
+print("\n" + "="*50)
+print("🎥 LIVE CAMERA OCR STARTED")
+print("• Press 'm' to TOGGLE ENGINE (YOLO vs EasyOCR)")
+print("• Press 's' to SAVE CURRENT TEXT to file")
+print("• Press 'q' to QUIT")
+print("="*50 + "\n")
 
 while True:
     ret, frame = cap.read()
     if not ret:
-        print("Failed to grab video frame.")
+        print("Failed to grab camera frame.")
         break
         
-    # Run YOLO prediction
-    results = model.predict(source=frame, conf=0.35, save=False, show=False, verbose=False)
+    recognized_string = ""
     
-    detections = []
-    for result in results:
-        boxes = result.boxes.xyxy.cpu().numpy()
-        labels = result.names
-        cls_ids = result.boxes.cls.cpu().numpy()
+    if mode == "EASYOCR":
+        # Run EasyOCR on current live frame
+        results = reader.readtext(frame)
+        extracted = []
+        for (bbox, text, prob) in results:
+            if prob > 0.25:
+                pts = np.array(bbox, dtype=np.int32)
+                cv2.polylines(frame, [pts], isClosed=True, color=(0, 255, 0), thickness=2)
+                
+                x_min = int(min([p[0] for p in bbox]))
+                y_min = int(min([p[1] for p in bbox]))
+                cv2.putText(frame, text, (x_min, max(15, y_min - 5)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                extracted.append(text)
+        recognized_string = " | ".join(extracted)
         
-        for i, box in enumerate(boxes):
-            x_min, y_min, x_max, y_max = box[:4]
-            label = labels[int(cls_ids[i])]
-            detections.append((x_min, y_min, x_max, y_max, label))
+    else:  # YOLO Mode
+        results = yolo_model.predict(source=frame, conf=0.25, save=False, show=False, verbose=False)
+        detections = []
+        for result in results:
+            boxes = result.boxes.xyxy.cpu().numpy()
+            labels = result.names
+            cls_ids = result.boxes.cls.cpu().numpy()
             
-            # Draw green bounding box & label
-            cv2.rectangle(frame, (int(x_min), int(y_min)), (int(x_max), int(y_max)), (0, 255, 0), 2)
-            cv2.putText(frame, label, (int(x_min), int(y_min) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-            
-    # Reconstruct text string
-    recognized_string = reconstruct_text(detections)
-    
-    # Overlay black top banner with yellow recognized text string
+            for i, box in enumerate(boxes):
+                x_min, y_min, x_max, y_max = box[:4]
+                label = labels[int(cls_ids[i])]
+                detections.append((x_min, y_min, x_max, y_max, label))
+                
+                cv2.rectangle(frame, (int(x_min), int(y_min)), (int(x_max), int(y_max)), (0, 255, 0), 2)
+                cv2.putText(frame, label, (int(x_min), max(15, int(y_min) - 5)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                
+        recognized_string = reconstruct_yolo_text(detections)
+
+    # Top Banner
     cv2.rectangle(frame, (0, 0), (frame.shape[1], 45), (0, 0, 0), -1)
-    cv2.putText(frame, f"RECOGNIZED: {recognized_string}", (15, 30), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 255), 2)
-    
-    # Show live stream window
-    cv2.imshow("Digital Character Recognition - Live Feed", frame)
+    banner_text = f"[{mode}] RECOGNIZED: {recognized_string}"
+    cv2.putText(frame, banner_text[:110], (15, 30), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
+
+    cv2.imshow("Live Camera OCR Stream (Press 'm' to switch mode)", frame)
     
     key = cv2.waitKey(1) & 0xFF
     if key == ord('q'):
         break
+    elif key == ord('m'):
+        mode = "YOLO" if mode == "EASYOCR" else "EASYOCR"
+        print(f"Switched engine mode to: {mode}")
     elif key == ord('s'):
         with open("live_scan_output.txt", "a") as f:
-            f.write(recognized_string + "\n")
+            f.write(f"[{mode}] {recognized_string}\n")
         print(f"Saved to file: {recognized_string}")
 
 cap.release()

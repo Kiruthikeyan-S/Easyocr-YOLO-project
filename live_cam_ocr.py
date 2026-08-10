@@ -25,6 +25,7 @@ def reconstruct_yolo_text(detections, y_threshold=15, space_threshold=25):
     current_line = [detections[0]]
     prev_y_min = detections[0][1]
     
+    
     for det in detections[1:]:
         x_min, y_min, x_max, y_max, label = det
         if abs(y_min - prev_y_min) > y_threshold:

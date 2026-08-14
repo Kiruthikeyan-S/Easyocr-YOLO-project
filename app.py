@@ -5,6 +5,8 @@ from PIL import Image
 from ultralytics import YOLO
 import easyocr
 import json
+import time
+from datetime import datetime
 
 # Set page configuration
 st.set_page_config(
@@ -185,9 +187,12 @@ def execute_ocr(image_np):
     else:
         return process_easy_ocr(image_np, conf_threshold=conf_thresh)
 
-# Session State for Live Stream Control
+# Session State for Live Stream & Database History Logging
 if "stream_active" not in st.session_state:
     st.session_state.stream_active = False
+
+if "live_history" not in st.session_state:
+    st.session_state.live_history = []
 
 # =========================================================
 # MODE 1: UPLOAD IMAGE / FOLDER
@@ -269,27 +274,35 @@ elif app_mode == "📸 Camera Snapshot (Take Photo)":
         st.markdown("</div>", unsafe_allow_html=True)
 
 # =========================================================
-# MODE 3: CONTINUOUS LIVE VIDEO STREAM (START / STOP BUTTONS)
+# MODE 3: CONTINUOUS LIVE VIDEO STREAM WITH DATABASE LOGGING
 # =========================================================
 elif app_mode == "🎥 Continuous Live Video Stream":
-    st.subheader("🎥 Real-Time Continuous Live Camera Stream")
+    st.subheader("🎥 Real-Time Continuous Live Camera Stream & Auto-Save History Log")
     
-    col_btn1, col_btn2 = st.columns(2)
+    col_btn1, col_btn2, col_btn3 = st.columns([2, 2, 2])
     with col_btn1:
         if st.button("🟢 START Live Camera (ON)", type="primary", use_container_width=True):
             st.session_state.stream_active = True
     with col_btn2:
         if st.button("🔴 STOP Live Camera (OFF)", type="secondary", use_container_width=True):
             st.session_state.stream_active = False
+    with col_btn3:
+        if st.button("🗑️ Clear Live History Log", use_container_width=True):
+            st.session_state.live_history = []
+            st.rerun()
 
     if st.session_state.stream_active:
-        st.success("🟢 Live Camera Stream is ON and running continuously. Click '🔴 STOP Live Camera' above to turn OFF.")
+        st.success("🟢 Live Camera Stream is ON. Text is automatically timestamped and saved into the Database History Log below!")
+        
         FRAME_WINDOW = st.image([])
         text_placeholder = st.empty()
+        history_placeholder = st.empty()
 
         cap = cv2.VideoCapture(0)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
+        last_saved_text = ""
 
         while st.session_state.stream_active:
             ret, frame = cap.read()
@@ -303,10 +316,54 @@ elif app_mode == "🎥 Continuous Live Video Stream":
             FRAME_WINDOW.image(processed_img, width=600)
             
             if recognized_text:
-                text_placeholder.markdown(f"<div class='result-card'><h4>🔴 Live Text Output:</h4><div class='ocr-text-box'>{recognized_text.replace(chr(10), '<br>')}</div></div>", unsafe_allow_html=True)
+                text_placeholder.markdown(f"<div class='result-card'><h4>🔴 Current Live Reading:</h4><div class='ocr-text-box'>{recognized_text.replace(chr(10), '<br>')}</div></div>", unsafe_allow_html=True)
+                
+                # Auto-save to Live History Database Log if reading is new
+                if recognized_text != last_saved_text:
+                    timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    st.session_state.live_history.append({
+                        "Timestamp": timestamp_str,
+                        "Engine": ocr_engine,
+                        "Recognized Text": recognized_text
+                    })
+                    last_saved_text = recognized_text
             else:
-                text_placeholder.markdown("<div class='result-card'><h4>🔴 Live Text Output:</h4><i>Scanning live camera feed...</i></div>", unsafe_allow_html=True)
+                text_placeholder.markdown("<div class='result-card'><h4>🔴 Current Live Reading:</h4><i>Scanning live camera feed...</i></div>", unsafe_allow_html=True)
 
         cap.release()
+
+    # Display Persistent Database History Log
+    st.markdown("---")
+    st.subheader("📜 Real-Time Live Detection History & Database Log")
+    
+    if st.session_state.live_history:
+        st.write(f"Total Saved Historical Readings: **{len(st.session_state.live_history)}**")
+        st.table(st.session_state.live_history[::-1])  # Show newest first
+        
+        # Prepare downloadable export files
+        formatted_history_text = "===================================================\n"
+        formatted_history_text += "  DIGITAL CHARACTER OCR - LIVE DETECTION DATABASE LOG\n"
+        formatted_history_text += "===================================================\n\n"
+        
+        for item in st.session_state.live_history:
+            formatted_history_text += f"[{item['Timestamp']}] Engine: {item['Engine']}\n"
+            formatted_history_text += f"Text: {item['Recognized Text']}\n"
+            formatted_history_text += "---------------------------------------------------\n"
+            
+        col_exp1, col_exp2 = st.columns(2)
+        with col_exp1:
+            st.download_button(
+                label="📥 Export Database History (.txt)",
+                data=formatted_history_text,
+                file_name="live_ocr_database_log.txt",
+                mime="text/plain"
+            )
+        with col_exp2:
+            st.download_button(
+                label="📥 Export Database History (.json)",
+                data=json.dumps(st.session_state.live_history, indent=4),
+                file_name="live_ocr_database_log.json",
+                mime="application/json"
+            )
     else:
-        st.info("💡 Click **🟢 START Live Camera (ON)** to start continuous live video processing.")
+        st.info("No saved history yet. Turn ON the live camera to start auto-logging readings to the database history!")

@@ -50,6 +50,60 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# --- SIDEBAR NAVIGATION & MODES ---
+st.sidebar.title("🔍 Navigation & Engine Choice")
+
+ocr_engine = st.sidebar.selectbox(
+    "🤖 Choose OCR Model Engine:",
+    [
+        "🖥️ Digital LCD Screen Mode (YOLO)",
+        "📄 ID Card & Document Mode (EasyOCR)"
+    ]
+)
+
+# Multi-Language Selection for EasyOCR
+selected_lang_name = st.sidebar.selectbox(
+    "🌐 Document Language (EasyOCR):",
+    [
+        "English (en)",
+        "Tamil (ta)",
+        "Hindi (hi)",
+        "French (fr)",
+        "Spanish (es)",
+        "German (de)",
+        "English + Tamil (en, ta)",
+        "English + Hindi (en, hi)"
+    ]
+)
+
+# Map human readable name to EasyOCR language codes tuple
+# Note: Tamil ('ta') includes English characters natively in EasyOCR
+lang_map = {
+    "English (en)": ('en',),
+    "Tamil (ta)": ('ta',),
+    "Hindi (hi)": ('hi', 'en'),
+    "French (fr)": ('fr', 'en'),
+    "Spanish (es)": ('es', 'en'),
+    "German (de)": ('de', 'en'),
+    "English + Tamil (en, ta)": ('ta',),
+    "English + Hindi (en, hi)": ('hi', 'en')
+}
+selected_langs = lang_map[selected_lang_name]
+
+app_mode = st.sidebar.radio(
+    "Select Input Mode:",
+    [
+        "📁 Upload Image / Folder",
+        "📸 Camera Snapshot (Take Photo)",
+        "🎥 Continuous Live Video Stream"
+    ]
+)
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("⚙️ Tuning Settings")
+conf_thresh = st.sidebar.slider("Confidence Threshold", 0.05, 0.80, 0.20, 0.05)
+y_thresh = st.sidebar.slider("Line Vertical Threshold (y_threshold)", 5, 50, 15, 1)
+
 # ---------------------------------------------------------
 # Load Engines
 # ---------------------------------------------------------
@@ -58,18 +112,22 @@ def load_yolo_model():
     return YOLO("YOLO OCR.pt")
 
 @st.cache_resource
-def load_easyocr_reader():
-    return easyocr.Reader(['en'], gpu=False)
+def load_easyocr_reader(langs):
+    return easyocr.Reader(list(langs), gpu=False)
 
 try:
     yolo_model = load_yolo_model()
 except Exception as e:
     st.error(f"Error loading YOLO model: {e}")
 
+easyocr_reader = None
 try:
-    easyocr_reader = load_easyocr_reader()
+    easyocr_reader = load_easyocr_reader(selected_langs)
 except Exception as e:
-    st.error(f"Error loading EasyOCR engine: {e}")
+    try:
+        easyocr_reader = load_easyocr_reader(('en',))
+    except Exception as ex:
+        st.error(f"Error loading EasyOCR engine: {ex}")
 
 # ---------------------------------------------------------
 # Engine 1: YOLO OCR (For Digital LCD Monitors & Meters)
@@ -129,6 +187,8 @@ def process_yolo_ocr(image_np, conf_threshold=0.25, y_threshold=15):
 # Engine 2: EasyOCR (For ID Cards, Paper & Printed Text)
 # ---------------------------------------------------------
 def process_easy_ocr(image_np, conf_threshold=0.20):
+    if easyocr_reader is None:
+        return image_np, "EasyOCR Engine Not Loaded", 0
     img_bgr = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)
     results = easyocr_reader.readtext(image_np)
     
@@ -152,34 +212,9 @@ def process_easy_ocr(image_np, conf_threshold=0.20):
     return img_draw_rgb, full_text, len(extracted_lines)
 
 
-# --- SIDEBAR NAVIGATION & MODES ---
-st.sidebar.title("🔍 Navigation & Engine Choice")
-
-ocr_engine = st.sidebar.selectbox(
-    "🤖 Choose OCR Model Engine:",
-    [
-        "🖥️ Digital LCD Screen Mode (YOLO)",
-        "📄 ID Card & Document Mode (EasyOCR)"
-    ]
-)
-
-app_mode = st.sidebar.radio(
-    "Select Input Mode:",
-    [
-        "📁 Upload Image / Folder",
-        "📸 Camera Snapshot (Take Photo)",
-        "🎥 Continuous Live Video Stream"
-    ]
-)
-
-st.sidebar.markdown("---")
-st.sidebar.subheader("⚙️ Tuning Settings")
-conf_thresh = st.sidebar.slider("Confidence Threshold", 0.05, 0.80, 0.20, 0.05)
-y_thresh = st.sidebar.slider("Line Vertical Threshold (y_threshold)", 5, 50, 15, 1)
-
 # Header Section
 st.title("🔍 Universal OCR System")
-st.markdown(f"Selected Model Engine: <span class='engine-badge'>{ocr_engine}</span>", unsafe_allow_html=True)
+st.markdown(f"Selected Model Engine: <span class='engine-badge'>{ocr_engine}</span> | Language: **{selected_lang_name}**", unsafe_allow_html=True)
 
 def execute_ocr(image_np):
     if "LCD Screen" in ocr_engine:
@@ -212,7 +247,7 @@ if app_mode == "📁 Upload Image / Folder":
             with col1:
                 st.image(image, caption="Original Input Image", width=600)
                 
-            with st.spinner(f"Processing with {ocr_engine}..."):
+            with st.spinner(f"Processing with {ocr_engine} ({selected_lang_name})..."):
                 processed_img, recognized_text, num_dets = execute_ocr(image_np)
                 
             with col2:
@@ -252,7 +287,7 @@ elif app_mode == "📸 Camera Snapshot (Take Photo)":
         with col1:
             st.image(image, caption="Captured Snapshot", width=600)
             
-        with st.spinner(f"Processing with {ocr_engine}..."):
+        with st.spinner(f"Processing with {ocr_engine} ({selected_lang_name})..."):
             processed_img, recognized_text, num_dets = execute_ocr(image_np)
             
         with col2:
@@ -296,7 +331,6 @@ elif app_mode == "🎥 Continuous Live Video Stream":
         
         FRAME_WINDOW = st.image([])
         text_placeholder = st.empty()
-        history_placeholder = st.empty()
 
         cap = cv2.VideoCapture(0)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
@@ -323,7 +357,7 @@ elif app_mode == "🎥 Continuous Live Video Stream":
                     timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     st.session_state.live_history.append({
                         "Timestamp": timestamp_str,
-                        "Engine": ocr_engine,
+                        "Engine": f"{ocr_engine} ({selected_lang_name})",
                         "Recognized Text": recognized_text
                     })
                     last_saved_text = recognized_text

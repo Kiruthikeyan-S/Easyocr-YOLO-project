@@ -1,4 +1,4 @@
-# 🖥️ Digital Character Recognition (LCD & Document OCR)
+# 🖥️Easyocr-YOLO-project (LCD & Document OCR)
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
 ![PyTorch](https://img.shields.io/badge/PyTorch-Deep%20Learning-EE4C2C?logo=pytorch)
@@ -7,7 +7,7 @@
 ![License](https://img.shields.io/badge/License-MIT-green)
 
 An **AI & Data Science pipeline** for Optical Character Recognition (OCR) fine-tuned to detect and reconstruct digital text from **LCD monitor screens, digital meters**, as well as **printed ID cards and documents**.
-<h1>demo & test link=https://easyocr-yolo-azm8w2htwpwgpo5x3tchyq.streamlit.app/<h1>
+<h1>Demo & Test link=https://easyocr-yolo-azm8w2htwpwgpo5x3tchyq.streamlit.app/<h1>
 ---
 
 ## 📌 Project Overview
